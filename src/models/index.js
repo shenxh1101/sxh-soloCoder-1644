@@ -150,7 +150,7 @@ const initDatabase = () => {
       db.run(`
         CREATE TABLE IF NOT EXISTS daily_statistics (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          stat_date DATE NOT NULL UNIQUE,
+          stat_date DATE NOT NULL,
           department_id INTEGER,
           total_topics INTEGER DEFAULT 0,
           passed_topics INTEGER DEFAULT 0,
@@ -159,7 +159,8 @@ const initDatabase = () => {
           pass_rate REAL DEFAULT 0,
           avg_votes REAL DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (department_id) REFERENCES departments(id)
+          FOREIGN KEY (department_id) REFERENCES departments(id),
+          UNIQUE(stat_date, department_id)
         )
       `);
 

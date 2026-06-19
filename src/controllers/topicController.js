@@ -235,6 +235,10 @@ const reviewTopic = async (req, res) => {
       return res.status(400).json({ error: '议题状态不支持审核' });
     }
 
+    if (req.user.role === 'manager' && topic.department_id !== req.user.department_id) {
+      return res.status(403).json({ error: '无权审核其他部门的议题' });
+    }
+
     const newStatus = action === 'approve' ? 'voting' : 'rejected';
     
     db.run(

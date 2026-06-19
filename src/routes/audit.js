@@ -5,6 +5,7 @@ const authMiddleware = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/permission');
 
 router.get('/', authMiddleware, requireAdmin, auditController.getAuditLogs);
+router.get('/filters', authMiddleware, requireAdmin, auditController.getAuditLogFilters);
 router.get('/export', authMiddleware, requireAdmin, auditController.exportAuditLogs);
 
 module.exports = router;
