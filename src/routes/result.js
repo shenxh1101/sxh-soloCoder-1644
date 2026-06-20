@@ -13,6 +13,10 @@ router.get('/resolutions/:id', authMiddleware, resolutionController.getResolutio
 router.post('/resolutions/:id/approve', authMiddleware, requireManager, resolutionController.approveResolution);
 router.post('/resolutions/:id/reject', authMiddleware, requireManager, resolutionController.rejectResolution);
 
-router.get('/tasks', authMiddleware, requireManager, resolutionController.getTaskList);
+router.get('/tasks', authMiddleware, resolutionController.getTaskList);
+router.get('/tasks/:id', authMiddleware, resolutionController.getTaskDetail);
+router.post('/tasks/:id/receive', authMiddleware, resolutionController.receiveTask);
+router.post('/tasks/:id/complete', authMiddleware, resolutionController.completeTask);
+router.post('/tasks/:id/return', authMiddleware, resolutionController.returnTask);
 
 module.exports = router;

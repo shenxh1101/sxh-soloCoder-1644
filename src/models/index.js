@@ -105,16 +105,71 @@ const initDatabase = () => {
           description TEXT,
           assignee_department_id INTEGER NOT NULL,
           assignee_user_id INTEGER,
-          status TEXT DEFAULT 'pending',
+          current_handler_id INTEGER,
+          status TEXT DEFAULT 'assigned',
           priority TEXT DEFAULT 'medium',
           due_date DATETIME,
+          received_at DATETIME,
+          completed_at DATETIME,
+          returned_count INTEGER DEFAULT 0,
+          last_remark TEXT,
+          last_operation_at DATETIME,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (resolution_id) REFERENCES resolutions(id),
           FOREIGN KEY (topic_id) REFERENCES topics(id),
           FOREIGN KEY (assignee_department_id) REFERENCES departments(id),
-          FOREIGN KEY (assignee_user_id) REFERENCES users(id)
+          FOREIGN KEY (assignee_user_id) REFERENCES users(id),
+          FOREIGN KEY (current_handler_id) REFERENCES users(id)
         )
       `);
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS task_operation_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          task_id INTEGER NOT NULL,
+          operator_id INTEGER NOT NULL,
+          action TEXT NOT NULL,
+          from_status TEXT,
+          to_status TEXT,
+          remark TEXT,
+          previous_handler_id INTEGER,
+          new_handler_id INTEGER,
+          ip_address TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (operator_id) REFERENCES users(id),
+          FOREIGN KEY (previous_handler_id) REFERENCES users(id),
+          FOREIGN KEY (new_handler_id) REFERENCES users(id)
+        )
+      `);
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS export_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          export_key TEXT NOT NULL UNIQUE,
+          module TEXT NOT NULL,
+          format TEXT NOT NULL,
+          filter_snapshot TEXT NOT NULL,
+          filter_hash TEXT NOT NULL,
+          record_count INTEGER NOT NULL DEFAULT 0,
+          file_size INTEGER NOT NULL DEFAULT 0,
+          content_snapshot BLOB,
+          content_filename TEXT,
+          content_type TEXT,
+          operator_id INTEGER,
+          operator_name TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_downloaded_at DATETIME,
+          download_count INTEGER DEFAULT 0,
+          FOREIGN KEY (operator_id) REFERENCES users(id)
+        )
+      `);
+
+      db.run(`ALTER TABLE export_records ADD COLUMN content_type TEXT`, (err) => {
+        if (err && !err.message.includes('duplicate column name')) {
+          console.log('content_type 列可能已存在，跳过添加');
+        }
+      });
 
       db.run(`
         CREATE TABLE IF NOT EXISTS audit_logs (
@@ -172,6 +227,13 @@ const initDatabase = () => {
       db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id)`);
       db.run(`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)`);
       db.run(`CREATE INDEX IF NOT EXISTS idx_tasks_department ON tasks(assignee_department_id)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_tasks_handler ON tasks(current_handler_id)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_task_ops_task ON task_operation_logs(task_id)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_task_ops_created ON task_operation_logs(created_at)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_export_key ON export_records(export_key)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_export_hash ON export_records(filter_hash)`);
+      db.run(`CREATE INDEX IF NOT EXISTS idx_export_module ON export_records(module)`);
       db.run(`CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_statistics(stat_date)`);
 
       resolve();

@@ -2,6 +2,14 @@ const db = require('../config/database');
 const dayjs = require('dayjs');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
+const crypto = require('crypto');
+
+const seededRand = (dateStr, deptId, slotIdx) => {
+  const key = `${dateStr}:${deptId === null ? 'ALL' : deptId}:${slotIdx}`;
+  const hex = crypto.createHash('md5').update(key).digest('hex');
+  const int = parseInt(hex.slice(0, 13), 16);
+  return int / 0x3fffffffffffffff;
+};
 
 const generateHistoryData = () => {
   return new Promise((resolve, reject) => {
@@ -60,14 +68,14 @@ const calculateDailyStatistics = (date = null) => {
             let totalVoters = row.total_voters || 0;
 
             if (deptId !== null && totalTopics === 0) {
-              totalTopics = Math.floor(Math.random() * 5) + 1;
-              passedTopics = Math.floor(Math.random() * totalTopics);
-              totalVoters = Math.floor(Math.random() * 15) + 3;
+              totalTopics = Math.floor(seededRand(statDate, deptId, 0) * 5) + 1;
+              passedTopics = Math.floor(seededRand(statDate, deptId, 1) * totalTopics);
+              totalVoters = Math.floor(seededRand(statDate, deptId, 2) * 15) + 3;
             }
             if (deptId === null && totalTopics === 0) {
-              totalTopics = Math.floor(Math.random() * 15) + 5;
-              passedTopics = Math.floor(Math.random() * (totalTopics - 2)) + 2;
-              totalVoters = Math.floor(Math.random() * 50) + 20;
+              totalTopics = Math.floor(seededRand(statDate, deptId, 3) * 15) + 5;
+              passedTopics = Math.floor(seededRand(statDate, deptId, 4) * (totalTopics - 2)) + 2;
+              totalVoters = Math.floor(seededRand(statDate, deptId, 5) * 50) + 20;
             }
 
             const userWhere = deptId ? 'WHERE department_id = ?' : '';
@@ -79,7 +87,7 @@ const calculateDailyStatistics = (date = null) => {
               (err, userResult) => {
                 if (err) return reject(err);
                 let totalEmployees = userResult.count || 10;
-                if (totalEmployees < totalVoters) totalEmployees = totalVoters + Math.floor(Math.random() * 10);
+                if (totalEmployees < totalVoters) totalEmployees = totalVoters + Math.floor(seededRand(statDate, deptId, 7) * 10);
 
                 const participationRate = totalEmployees > 0 ? (totalVoters / totalEmployees) * 100 : 0;
                 const passRate = totalTopics > 0 ? (passedTopics / totalTopics) * 100 : 0;
@@ -97,27 +105,35 @@ const calculateDailyStatistics = (date = null) => {
 
                     let avgVotes = avgResult.avg_votes || 0;
                     if (avgVotes === 0 && totalTopics > 0) {
-                      avgVotes = Math.floor(Math.random() * 20) + 5 + (totalVoters / totalTopics) * 0.5;
+                      avgVotes = Math.floor(seededRand(statDate, deptId, 6) * 20) + 5 + (totalVoters / totalTopics) * 0.5;
                     }
 
                     db.run(
-                      `INSERT OR REPLACE INTO daily_statistics 
-                       (stat_date, department_id, total_topics, passed_topics, total_voters, 
-                        participation_rate, pass_rate, avg_votes)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                      [
-                        statDate,
-                        deptId,
-                        totalTopics,
-                        passedTopics,
-                        totalVoters,
-                        Math.round(participationRate * 100) / 100,
-                        Math.round(passRate * 100) / 100,
-                        Math.round(avgVotes * 100) / 100,
-                      ],
-                      (err) => {
-                        if (err) return reject(err);
-                        processDept(index + 1);
+                      `DELETE FROM daily_statistics WHERE stat_date = ? 
+                       AND (department_id = ? OR (department_id IS NULL AND ? IS NULL))`,
+                      [statDate, deptId, deptId],
+                      (delErr) => {
+                        if (delErr) return reject(delErr);
+                        db.run(
+                          `INSERT INTO daily_statistics 
+                           (stat_date, department_id, total_topics, passed_topics, total_voters, 
+                            participation_rate, pass_rate, avg_votes)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                          [
+                            statDate,
+                            deptId,
+                            totalTopics,
+                            passedTopics,
+                            totalVoters,
+                            Math.round(participationRate * 100) / 100,
+                            Math.round(passRate * 100) / 100,
+                            Math.round(avgVotes * 100) / 100,
+                          ],
+                          (err) => {
+                            if (err) return reject(err);
+                            processDept(index + 1);
+                          }
+                        );
                       }
                     );
                   }
@@ -133,29 +149,7 @@ const calculateDailyStatistics = (date = null) => {
   });
 };
 
-const triggerStatistics = async (req, res) => {
-  try {
-    const { days = 7, include_history = false } = req.query;
-    const today = dayjs();
-
-    if (include_history === 'true' || days > 7) {
-      const result = await generateHistoryData();
-      return res.json(result);
-    }
-
-    for (let i = days - 1; i >= 0; i--) {
-      const date = today.subtract(i, 'day').format('YYYY-MM-DD');
-      await calculateDailyStatistics(date);
-    }
-
-    res.json({ message: `已生成最近 ${days} 天的统计数据` });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-const getStatistics = (req, res) => {
-  const { start_date, end_date, department_id } = req.query;
+const buildStatisticsWhereClause = (start_date, end_date, department_id) => {
   const startDate = start_date || dayjs().subtract(30, 'day').format('YYYY-MM-DD');
   const endDate = end_date || dayjs().format('YYYY-MM-DD');
 
@@ -168,6 +162,75 @@ const getStatistics = (req, res) => {
   } else {
     whereClause += ' AND department_id IS NULL';
   }
+
+  return { whereClause, params, startDate, endDate };
+};
+
+const triggerStatistics = async (req, res) => {
+  try {
+    const { days = 7, include_history = false, start_date, end_date } = req.query;
+    const today = dayjs();
+    const processedDates = [];
+
+    if (start_date || end_date) {
+      const rangeStart = dayjs(start_date || end_date);
+      const rangeEnd = dayjs(end_date || start_date);
+
+      if (!rangeStart.isValid() || !rangeEnd.isValid()) {
+        return res.status(400).json({ error: 'start_date 或 end_date 格式无效，请使用 YYYY-MM-DD' });
+      }
+
+      const start = rangeStart.isAfter(rangeEnd) ? rangeEnd : rangeStart;
+      const end = rangeStart.isAfter(rangeEnd) ? rangeStart : rangeEnd;
+      const totalDays = end.diff(start, 'day') + 1;
+
+      if (totalDays > 365) {
+        return res.status(400).json({ error: '补跑区间不能超过 365 天' });
+      }
+
+      for (let i = 0; i < totalDays; i++) {
+        const date = start.add(i, 'day').format('YYYY-MM-DD');
+        await calculateDailyStatistics(date);
+        processedDates.push(date);
+      }
+
+      return res.json({
+        message: `已补跑 ${processedDates.length} 天的统计数据`,
+        mode: 'range',
+        start_date: start.format('YYYY-MM-DD'),
+        end_date: end.format('YYYY-MM-DD'),
+        processed_dates: processedDates,
+        count: processedDates.length,
+      });
+    }
+
+    if (include_history === 'true' || days > 7) {
+      const result = await generateHistoryData();
+      return res.json(result);
+    }
+
+    const daysNum = parseInt(days, 10) || 7;
+    for (let i = daysNum - 1; i >= 0; i--) {
+      const date = today.subtract(i, 'day').format('YYYY-MM-DD');
+      await calculateDailyStatistics(date);
+      processedDates.push(date);
+    }
+
+    res.json({
+      message: `已生成最近 ${processedDates.length} 天的统计数据`,
+      mode: 'days',
+      days: daysNum,
+      processed_dates: processedDates,
+      count: processedDates.length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const getStatistics = (req, res) => {
+  const { start_date, end_date, department_id } = req.query;
+  const { whereClause, params, startDate, endDate } = buildStatisticsWhereClause(start_date, end_date, department_id);
 
   const sql = `
     SELECT * FROM daily_statistics
@@ -302,18 +365,7 @@ const generateDeptBarChart = (stats) => {
 
 const exportExcelReport = (req, res) => {
   const { start_date, end_date, department_id } = req.query;
-  const startDate = start_date || dayjs().subtract(30, 'day').format('YYYY-MM-DD');
-  const endDate = end_date || dayjs().format('YYYY-MM-DD');
-
-  let whereClause = 'WHERE stat_date >= ? AND stat_date <= ?';
-  const params = [startDate, endDate];
-
-  if (department_id) {
-    whereClause += ' AND department_id = ?';
-    params.push(department_id);
-  } else {
-    whereClause += ' AND department_id IS NULL';
-  }
+  const { whereClause, params, startDate, endDate } = buildStatisticsWhereClause(start_date, end_date, department_id);
 
   db.all(
     `SELECT * FROM daily_statistics ${whereClause} ORDER BY stat_date ASC`,
@@ -458,18 +510,7 @@ const exportExcelReport = (req, res) => {
 
 const exportPdfReport = (req, res) => {
   const { start_date, end_date, department_id } = req.query;
-  const startDate = start_date || dayjs().subtract(30, 'day').format('YYYY-MM-DD');
-  const endDate = end_date || dayjs().format('YYYY-MM-DD');
-
-  let whereClause = 'WHERE stat_date >= ? AND stat_date <= ?';
-  const params = [startDate, endDate];
-
-  if (department_id) {
-    whereClause += ' AND department_id = ?';
-    params.push(department_id);
-  } else {
-    whereClause += ' AND department_id IS NULL';
-  }
+  const { whereClause, params, startDate, endDate } = buildStatisticsWhereClause(start_date, end_date, department_id);
 
   db.all(
     `SELECT * FROM daily_statistics ${whereClause} ORDER BY stat_date ASC`,
